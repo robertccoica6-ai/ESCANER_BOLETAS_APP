@@ -93,18 +93,21 @@ async function prepareImage(file, maxDim = 1400) {
 }
 
 async function extractReceiptData({ base64, mediaType, blockType }) {
-  const contentBlock =
-    blockType === "document"
-      ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } }
-      : { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } };
+  // Ajustamos el payload para que coincida exactamente con lo que recibe tu api/extract.js
+  const contentBlock = {
+    type: blockType === "document" ? "document" : "image",
+    source: {
+      media_type: blockType === "document" ? "application/pdf" : mediaType,
+      data: base64,
+    },
+  };
 
   const prompt = `Eres un asistente contable. Observa esta boleta o factura peruana y extrae sus datos.
 Responde ÚNICAMENTE con un objeto JSON válido, sin texto adicional, sin markdown, con esta forma exacta:
 {"proveedor": string, "ruc": string, "numero": string, "fecha": "DD/MM/AAAA", "subtotal": number, "igv": number, "total": number, "categoria": una de ${JSON.stringify(CATEGORIES)}}
 Si algún campo no aparece en el documento, usa "" para texto o 0 para números. No inventes datos. No incluyas el símbolo S/ en los números, solo el valor numérico.`;
 
-  // Calls OUR OWN backend (/api/extract), which holds the real Anthropic API
-  // key server-side and forwards the request. The browser never sees the key.
+  // Llamada limpia a tu API serverless
   const response = await fetch("/api/extract", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -113,15 +116,23 @@ Si algún campo no aparece en el documento, usa "" para texto o 0 para números.
     }),
   });
 
-  if (!response.ok) throw new Error(`API respondió ${response.status}`);
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => null);
+    throw new Error(errorData?.error || `API respondió ${response.status}`);
+  }
+
   const data = await response.json();
   const text = data.content
-    .filter((b) => b.type === "text")
+    ?.filter((b) => b.type === "text")
     .map((b) => b.text)
     .join("\n");
+
+  if (!text) throw new Error("No se recibió respuesta de texto de la IA");
+
   const cleaned = text.replace(/```json|```/g, "").trim();
   const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("La IA no devolvió datos legibles");
+  if (!jsonMatch) throw new Error("La IA no devolvió un JSON legible");
+
   return JSON.parse(jsonMatch[0]);
 }
 
