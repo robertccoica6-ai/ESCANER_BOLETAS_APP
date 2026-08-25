@@ -1,14 +1,6 @@
-// Backend proxy — corre en el servidor, nunca en el navegador.
-// Guarda tu API key aquí (variable de entorno GEMINI_API_KEY) y nunca en el frontend.
-//
-// Desplegado en Vercel, este archivo se convierte automáticamente en el
-// endpoint POST /api/extract — no requiere configuración adicional.
-//
-// Usa la API de Gemini (Google), que ofrece un tier gratuito con límite de
-// solicitudes por día — útil mientras pruebas o si tu volumen es bajo.
-// Consulta límites y precios vigentes en https://ai.google.dev/gemini-api/docs/pricing
-
-const GEMINI_MODEL = "gemini-3.7-flash"; // rápido y barato; revisa ai.google.dev por modelos vigentes
+// Usamos gemini-2.5-flash para la máxima velocidad y estabilidad.
+// También puedes cambiarlo a "gemini-1.5-flash" si usas esa versión específica.
+const GEMINI_MODEL = "gemini-2.5-flash"; 
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -22,29 +14,76 @@ export default async function handler(req, res) {
   }
 
   try {
-    // El frontend manda: { content: [ {type:"image"|"document", source:{...}}, {type:"text", text} ] }
-    // Lo traducimos al formato que espera Gemini.
-    const { content } = req.body;
-    if (!content) {
-      return res.status(400).json({ error: "Falta el campo 'content' en la solicitud." });
+    const { content, stream = true } = req.body;
+
+    if (!content || !Array.isArray(content) || content.length === 0) {
+      return res.status(400).json({ error: "Falta el campo 'content' o está vacío." });
     }
 
-    const textBlock = content.find((b) => b.type === "text");
-    const fileBlock = content.find((b) => b.type === "image" || b.type === "document");
+    // 1. Mapeamos TODOS los elementos (múltiples textos y archivos)
+    const parts = content
+      .map((block) => {
+        if (block.type === "image" || block.type === "document") {
+          if (!block.source?.media_type || !block.source?.data) return null;
+          return {
+            inline_data: {
+              mime_type: block.source.media_type,
+              data: block.source.data,
+            },
+          };
+        }
+        if (block.type === "text" && block.text) {
+          return { text: block.text };
+        }
+        return null;
+      })
+      .filter(Boolean); // Elimina elementos nulos o mal estructurados
 
-    const parts = [];
-    if (fileBlock) {
-      parts.push({
-        inline_data: {
-          mime_type: fileBlock.source.media_type,
-          data: fileBlock.source.data,
-        },
-      });
-    }
-    if (textBlock) {
-      parts.push({ text: textBlock.text });
+    if (parts.length === 0) {
+      return res.status(400).json({ error: "No se encontraron partes válidas en 'content'." });
     }
 
+    // 2. Si el cliente solicita streaming (por defecto activado para evitar 503)
+    if (stream) {
+      const geminiResponse = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:streamGenerateContent?key=${process.env.GEMINI_API_KEY}&alt=sse`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts }],
+            generationConfig: {
+              maxOutputTokens: 2000,
+            },
+          }),
+        }
+      );
+
+      if (!geminiResponse.ok) {
+        const errorData = await geminiResponse.json();
+        return res.status(geminiResponse.status).json(errorData);
+      }
+
+      // Configuramos los headers para SSE (Streaming de respuesta)
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache, no-transform");
+      res.setHeader("Connection", "keep-alive");
+
+      // Transmitimos la respuesta directamente al cliente a medida que llega
+      const reader = geminiResponse.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        res.write(chunk);
+      }
+
+      return res.end();
+    }
+
+    // 3. Petición estándar sin Streaming (Modo tradicional)
     const geminiResponse = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
@@ -52,11 +91,8 @@ export default async function handler(req, res) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ role: "user", parts }],
-          generationConfig: { 
-            maxOutputTokens: 1000,
-            thinkingConfig: {
-              thinkingLevel: "low"
-            }
+          generationConfig: {
+            maxOutputTokens: 2000,
           },
         }),
       }
@@ -68,13 +104,11 @@ export default async function handler(req, res) {
       return res.status(geminiResponse.status).json(geminiData);
     }
 
-    // Adaptamos la respuesta de Gemini al mismo formato { content: [{type:"text", text}] }
-    // que ya usa el frontend, para no tener que tocar App.jsx.
-    const text = geminiData?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("\n") || "";
+    const text =
+      geminiData?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("\n") || "";
 
     return res.status(200).json({ content: [{ type: "text", text }] });
   } catch (err) {
     return res.status(500).json({ error: err.message || "Error interno del servidor" });
   }
 }
-
