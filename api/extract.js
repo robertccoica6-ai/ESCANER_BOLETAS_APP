@@ -8,7 +8,7 @@
 // solicitudes por día — útil mientras pruebas o si tu volumen es bajo.
 // Consulta límites y precios vigentes en https://ai.google.dev/gemini-api/docs/pricing
 
-const GEMINI_MODEL = "gemini-2.5-flash"; // rápido y barato; revisa ai.google.dev por modelos vigentes
+const GEMINI_MODEL = "gemini-3.7-flash"; // rápido y barato; revisa ai.google.dev por modelos vigentes
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
