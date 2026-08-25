@@ -93,7 +93,6 @@ async function prepareImage(file, maxDim = 1400) {
 }
 
 async function extractReceiptData({ base64, mediaType, blockType }) {
-  // Ajustamos el payload para que coincida exactamente con lo que recibe tu api/extract.js
   const contentBlock = {
     type: blockType === "document" ? "document" : "image",
     source: {
@@ -107,7 +106,6 @@ Responde ÚNICAMENTE con un objeto JSON válido, sin texto adicional, sin markdo
 {"proveedor": string, "ruc": string, "numero": string, "fecha": "DD/MM/AAAA", "subtotal": number, "igv": number, "total": number, "categoria": una de ${JSON.stringify(CATEGORIES)}}
 Si algún campo no aparece en el documento, usa "" para texto o 0 para números. No inventes datos. No incluyas el símbolo S/ en los números, solo el valor numérico.`;
 
-  // Llamada limpia a tu API serverless
   const response = await fetch("/api/extract", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -116,18 +114,16 @@ Si algún campo no aparece en el documento, usa "" para texto o 0 para números.
     }),
   });
 
+  const data = await response.json().catch(() => null);
+
   if (!response.ok) {
-    const errorData = await response.json().catch(() => null);
-    throw new Error(errorData?.error || `API respondió ${response.status}`);
+    // Extrae el mensaje de error de Gemini o Vercel sin mostrar [object Object]
+    const errorMsg = data?.error?.message || data?.error || `Error ${response.status} en la API`;
+    throw new Error(typeof errorMsg === "object" ? JSON.stringify(errorMsg) : errorMsg);
   }
 
-  const data = await response.json();
-  const text = data.content
-    ?.filter((b) => b.type === "text")
-    .map((b) => b.text)
-    .join("\n");
-
-  if (!text) throw new Error("No se recibió respuesta de texto de la IA");
+  const text = data?.content?.[0]?.text || "";
+  if (!text) throw new Error("No se recibió texto de la IA");
 
   const cleaned = text.replace(/```json|```/g, "").trim();
   const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
@@ -135,6 +131,7 @@ Si algún campo no aparece en el documento, usa "" para texto o 0 para números.
 
   return JSON.parse(jsonMatch[0]);
 }
+
 
 function Stamp() {
   return (
