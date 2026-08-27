@@ -598,8 +598,23 @@ export default function ReceiptScanner() {
 
         .spin { animation: spin 1s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
-
-        @media (max-width: 560px) {
+.footer {
+  max-width: 980px;
+  margin: 40px auto 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--ledger-line);
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  letter-spacing: 0.02em;
+}
+.footer strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+        
+   @media (max-width: 560px) {
           .row-card { flex-wrap: wrap; }
         }
       `}</style>
@@ -742,7 +757,11 @@ export default function ReceiptScanner() {
             </div>
           ))}
         </div>
-      )}
+            )}
+
+      <footer className="footer">
+        Desarrollado por <strong>Robert Ccoicca Janampa</strong> — Ingeniero de Sistemas
+      </footer>
     </div>
   );
 }
